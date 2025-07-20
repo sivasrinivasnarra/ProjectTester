@@ -1,0 +1,21 @@
+# AI Model API Keys
+OPENAI_API_KEY=your_openai_api_key_here
+GOOGLE_API_KEY=your_google_api_key_here
+
+# Model Configuration
+DEFAULT_MODEL=gpt-4
+FALLBACK_MODEL=gemini-pro
+
+# Application Settings
+DEBUG=True
+LOG_LEVEL=INFO
+MAX_TOKENS=4000
+TEMPERATURE=0.7
+
+# File Paths
+GENERATED_CODE_DIR=generated/code
+GENERATED_TESTS_DIR=generated/tests
+REPORTS_DIR=generated/reports
+
+# Database
+DATABASE_URL=sqlite:///project_tester.db 
