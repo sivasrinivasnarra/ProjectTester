@@ -69,6 +69,14 @@ st.markdown("""
         padding: 1rem;
         margin: 0.5rem 0;
     }
+    body {
+        background-color: #f8f9fa;
+        font-family: "Segoe UI", sans-serif;
+    }
+    .stButton>button {
+        border-radius: 4px;
+        padding: 0.5rem 1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -81,6 +89,10 @@ if 'tech_stack' not in st.session_state:
     st.session_state.tech_stack = None
 if 'uploaded_document' not in st.session_state:
     st.session_state.uploaded_document = None
+if 'uploaded_project_path' not in st.session_state:
+    st.session_state.uploaded_project_path = None
+if 'uploaded_project_files' not in st.session_state:
+    st.session_state.uploaded_project_files = []
 
 # Initialize core components
 @st.cache_resource
@@ -98,6 +110,12 @@ def initialize_components():
 
 components = initialize_components()
 
+# Helper to log errors and display them
+def handle_and_display_error(error: Exception, context: str):
+    """Record error via ErrorHandler and display to user."""
+    components['error_handler'].handle_error(error, context)
+    st.error(f"{context}: {str(error)}")
+
 # Document processing functions
 def extract_text_from_pdf(pdf_file):
     """Extract text from PDF file"""
@@ -108,11 +126,11 @@ def extract_text_from_pdf(pdf_file):
         for page in pdf_reader.pages:
             text += page.extract_text() + "\n"
         return text
-    except ImportError:
-        st.error("PyPDF2 not installed. Please install: pip install PyPDF2")
+    except ImportError as e:
+        handle_and_display_error(e, "extract_text_from_pdf: missing PyPDF2")
         return None
     except Exception as e:
-        st.error(f"Error reading PDF: {str(e)}")
+        handle_and_display_error(e, "extract_text_from_pdf")
         return None
 
 def extract_text_from_docx(docx_file):
@@ -124,11 +142,11 @@ def extract_text_from_docx(docx_file):
         for paragraph in doc.paragraphs:
             text += paragraph.text + "\n"
         return text
-    except ImportError:
-        st.error("python-docx not installed. Please install: pip install python-docx")
+    except ImportError as e:
+        handle_and_display_error(e, "extract_text_from_docx: missing python-docx")
         return None
     except Exception as e:
-        st.error(f"Error reading Word document: {str(e)}")
+        handle_and_display_error(e, "extract_text_from_docx")
         return None
 
 def extract_text_from_txt(txt_file):
@@ -136,7 +154,7 @@ def extract_text_from_txt(txt_file):
     try:
         return txt_file.read().decode('utf-8')
     except Exception as e:
-        st.error(f"Error reading text file: {str(e)}")
+        handle_and_display_error(e, "extract_text_from_txt")
         return None
 
 def process_uploaded_document(uploaded_file):
@@ -153,8 +171,29 @@ def process_uploaded_document(uploaded_file):
     elif file_extension == 'txt':
         return extract_text_from_txt(uploaded_file)
     else:
-        st.error(f"Unsupported file format: {file_extension}")
+        handle_and_display_error(ValueError("Unsupported file"), f"process_uploaded_document: {file_extension}")
         return None
+
+# Helper functions for uploaded projects
+def extract_project_zip(uploaded_zip) -> str | None:
+    """Extract uploaded project ZIP to a temporary directory."""
+    try:
+        temp_dir = tempfile.mkdtemp(prefix="uploaded_project_")
+        with zipfile.ZipFile(uploaded_zip, 'r') as zip_ref:
+            zip_ref.extractall(temp_dir)
+        return temp_dir
+    except Exception as e:
+        handle_and_display_error(e, "extract_project_zip")
+        return None
+
+def list_python_files(project_dir: str) -> list[str]:
+    """List Python files inside the extracted project."""
+    py_files = []
+    for root, _, files in os.walk(project_dir):
+        for f in files:
+            if f.endswith('.py'):
+                py_files.append(os.path.join(root, f))
+    return py_files
 
 def suggest_tech_stack(requirement_text, ai_engine, model="gpt-4o-mini"):
     """Suggest appropriate tech stack based on requirements"""
@@ -272,7 +311,7 @@ def suggest_tech_stack(requirement_text, ai_engine, model="gpt-4o-mini"):
             return _get_fallback_tech_stacks()
             
     except Exception as e:
-        st.error(f"Error suggesting tech stack: {str(e)}")
+        handle_and_display_error(e, "suggest_tech_stack")
         return _get_fallback_tech_stacks()
 
 def _get_fallback_tech_stacks():
@@ -1953,7 +1992,7 @@ def generate_project_structure(selected_tech_stack, requirement_text, ai_engine,
             return {"success": False, "error": f"JSON parsing error: {str(e)}"}
             
     except Exception as e:
-        st.error(f"Error generating project structure: {str(e)}")
+        handle_and_display_error(e, "generate_project_structure")
         return {"success": False, "error": str(e)}
 
 def generate_code_for_structure(project_structure, requirement_text, ai_engine, model="gpt-4o-mini"):
@@ -2176,7 +2215,7 @@ def generate_code_for_structure(project_structure, requirement_text, ai_engine, 
             "additional_files": additional_parsed
         }
     except Exception as e:
-        st.error(f"Error generating code: {str(e)}")
+        handle_and_display_error(e, "generate_code_for_structure")
         return {"success": False, "error": str(e)}
 
 # Main application
@@ -2243,11 +2282,12 @@ def main():
             st.info("No files generated yet")
     
     # Main tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "Code Generation", 
-        "Test Generation", 
-        "Analysis", 
-        "Deployment Check", 
+    tab1, tab2, tab_error, tab3, tab4, tab5 = st.tabs([
+        "Code Generation",
+        "Test Generation",
+        "Error Logs",
+        "Analysis",
+        "Deployment Check",
         "File Manager"
     ])
     
@@ -2431,7 +2471,7 @@ def main():
                             st.warning("Please select a tech stack from the list.")
                             
                     except Exception as e:
-                        st.error(f"Error during project structure generation: {str(e)}")
+                        handle_and_display_error(e, "project_structure_tab")
         else:
             st.warning("Please suggest a tech stack first.")
         
@@ -2569,22 +2609,58 @@ def main():
                                 
                             else:
                                 error_msg = code_result.get('error', 'Unknown error') if code_result else 'No response from AI'
-                                st.error(f"Code generation failed: {error_msg}")
+                                handle_and_display_error(Exception(error_msg), "code_generation")
                         else:
                             st.warning("Please select a tech stack from the list.")
-                            
+
                     except Exception as e:
-                        st.error(f"Error during code generation: {str(e)}")
+                        handle_and_display_error(e, "code_generation_tab")
         else:
             st.warning("Please generate project structure first.")
     
     # Tab 2: Test Generation
     with tab2:
         st.header("Automated Test Generation")
-        
+
+        st.subheader("Generate Tests for Existing Project")
+        uploaded_zip = st.file_uploader("Upload project ZIP", type=["zip"], key="project_zip")
+        if uploaded_zip:
+            project_dir = extract_project_zip(uploaded_zip)
+            if project_dir:
+                st.session_state.uploaded_project_path = project_dir
+                st.session_state.uploaded_project_files = list_python_files(project_dir)
+                st.success("Project uploaded and extracted")
+
+        if st.session_state.uploaded_project_path:
+            code_files = st.session_state.uploaded_project_files
+            if code_files:
+                selected = st.multiselect("Select files for test generation", code_files)
+                if st.button("Generate Tests for Uploaded Project") and selected:
+                    for file_path in selected:
+                        try:
+                            with open(file_path, 'r', encoding='utf-8') as f:
+                                code_content = f.read()
+                            tr = components['test_generator'].generate_tests(code_content, language='python')
+                            if tr['success']:
+                                st.success(f"Generated tests for {os.path.basename(file_path)}")
+                                st.code(tr['test_code'], language='python')
+                                test_file_path = components['file_manager'].save_test_file(os.path.basename(file_path), tr['test_code'])
+                                st.session_state.generated_files.append({
+                                    'name': os.path.basename(test_file_path),
+                                    'path': test_file_path,
+                                    'type': 'test',
+                                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                })
+                                st.info(f"Saved to: {test_file_path}")
+                            else:
+                                handle_and_display_error(Exception(tr['error']), 'upload_test_generation')
+                        except Exception as e:
+                            handle_and_display_error(e, 'upload_test_generation')
+            st.divider()
+
         if st.session_state.current_requirement:
             st.info(f"Current requirement: {st.session_state.current_requirement[:100]}...")
-            
+
             if st.button("Generate Tests", type="primary"):
                 with st.spinner("Generating comprehensive test suite..."):
                     try:
@@ -2592,20 +2668,20 @@ def main():
                             st.session_state.current_requirement,
                             language="python"
                         )
-                        
+
                         if test_result['success']:
                             st.success("Tests generated successfully!")
-                            
+
                             # Display tests
                             st.subheader("Generated Test Suite")
                             st.code(test_result['test_code'], language='python')
-                            
+
                             # Save test file
                             test_file_path = components['file_manager'].save_test_file(
                                 st.session_state.current_requirement,
                                 test_result['test_code']
                             )
-                            
+
                             # Update session state
                             st.session_state.generated_files.append({
                                 'name': os.path.basename(test_file_path),
@@ -2613,16 +2689,45 @@ def main():
                                 'type': 'test',
                                 'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             })
-                            
+
                             st.info(f"Tests saved to: {test_file_path}")
-                            
+
                         else:
-                            st.error(f"Test generation failed: {test_result['error']}")
-                            
+                            handle_and_display_error(Exception(test_result['error']), "test_generation")
+
                     except Exception as e:
-                        st.error(f"Error during test generation: {str(e)}")
+                        handle_and_display_error(e, "test_generation_tab")
         else:
             st.warning("Please generate code first or enter requirements")
+
+    # Tab: Error Logs
+    with tab_error:
+        st.header("Error Logs")
+        summary = components['error_handler'].get_error_summary()
+        st.write(f"Total Errors: {summary['total_errors']}")
+        st.write(f"Recovery Rate: {summary['recovery_rate']}%")
+
+        if summary.get('recent_errors'):
+            for err in summary['recent_errors']:
+                with st.expander(f"{err['timestamp']} - {err['context']}"):
+                    st.error(err['error_message'])
+                    st.text(err['traceback'])
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Clear Error Log"):
+                components['error_handler'].clear_error_log()
+                st.success("Error log cleared")
+        with col2:
+            if st.button("Export Error Log"):
+                path = components['error_handler'].export_error_log()
+                with open(path, 'r') as f:
+                    st.download_button(
+                        label="Download Error Log",
+                        data=f.read(),
+                        file_name=os.path.basename(path),
+                        mime="application/json"
+                    )
     
     # Tab 3: Code Analysis
     with tab3:
@@ -2730,7 +2835,7 @@ def main():
                             st.json(analysis)
                             
                     except Exception as e:
-                        st.error(f"Error during analysis: {str(e)}")
+                        handle_and_display_error(e, "analysis_tab")
         else:
             st.warning("No valid Python code files available for analysis")
     
@@ -2827,10 +2932,10 @@ def main():
                             
                         else:
                             error_msg = assessment.get('error', 'Unknown error')
-                            st.error(f"Assessment failed: {error_msg}")
-                            
+                            handle_and_display_error(Exception(error_msg), "deployment_assessment")
+
                     except Exception as e:
-                        st.error(f"Error during assessment: {str(e)}")
+                        handle_and_display_error(e, "deployment_tab")
         else:
             st.warning("Please generate code first or enter requirements")
     
@@ -2884,7 +2989,7 @@ def main():
                                 st.success("File deleted successfully!")
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Error deleting file: {str(e)}")
+                                handle_and_display_error(e, "file_delete")
             
             # Export all files
             if st.button("Export All Files", type="primary"):
@@ -2898,7 +3003,7 @@ def main():
                             mime="application/zip"
                         )
                 except Exception as e:
-                    st.error(f"Error creating ZIP archive: {str(e)}")
+                    handle_and_display_error(e, "create_zip_archive")
             
             # Clear all files
             if st.button("Clear All Files", type="secondary"):
@@ -2910,7 +3015,7 @@ def main():
                     st.success("All files cleared successfully!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Error clearing files: {str(e)}")
+                    handle_and_display_error(e, "clear_files")
         else:
             st.info("No files generated yet. Start by generating some code!")
     
